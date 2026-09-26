@@ -244,6 +244,17 @@ const DB_QUERY = { FULL_TABLE: 10000, COMBINATION_WITH_AI: 10011 } as const;
 const GCM_AAD = Buffer.from("eufy security");
 
 /**
+ * The level-2 sub-header read as one little-endian uint32, `[seq, 03, 02, 01]` for the first 256 frames.
+ *
+ * A station refuses the frame that wraps the low byte back to 0: measured on a HomeBase 3, every start on a
+ * connection was answered -148 once the byte went from 255 to 0, except while it passed through roughly 246 to
+ * 255 again, and a new connection was served at once. Counting on into the upper bytes keeps the sequence
+ * increasing instead. Unverified: that a station accepts the upper bytes moving. Until the first wrap this is
+ * byte for byte the header a station has always accepted, so the change cannot cost a frame that worked.
+ */
+const LEVEL2_SEQ_BASE = 0x01020300;
+
+/**
  * Transport wiring for a PPCS session — internal to the SDK; a host reaches sessions through the facade.
  * @internal
  */
@@ -1505,8 +1516,9 @@ export class P2PSession extends EventEmitter {
     const c = createCipheriv("aes-256-gcm", this.level2Key, nonce);
     c.setAAD(GCM_AAD);
     const ct = Buffer.concat([c.update(plaintext), c.final()]);
-    const sub = Buffer.from([this.level2Seq & 0xff, 0x03, 0x02, 0x01]);
-    this.level2Seq = (this.level2Seq + 1) & 0xff;
+    const sub = Buffer.alloc(4);
+    sub.writeUInt32LE((LEVEL2_SEQ_BASE + this.level2Seq) >>> 0);
+    this.level2Seq = (this.level2Seq + 1) >>> 0;
     return Buffer.concat([c.getAuthTag(), nonce, sub, ct]);
   }
 
